@@ -4,15 +4,8 @@
 
 ## 一、快速开始
 
-1. 用 **Unity 6000.3.14f1**（Unity 6.3 LTS，按测试要求；6000.3.x 均可）打开本项目。
-2. 菜单执行 **`NetTest > Build Scene`**：
-   - 生成 `Assets/Scenes/BallRoom.unity`（房间、地面、四面墙、若干障碍、灯光、4 个出生点、NetworkManager）
-   - 生成 `Assets/Prefabs/ball.prefab`、`networkPlayer.prefab`、`roomController.prefab`
-   - 生成 URP 材质与 PhysicMaterial
-   - 自动把 `BallRoom` 加入 Build Settings
-3. 打开并运行 `Assets/Scenes/BallRoom`，屏幕中央出现连接菜单。
-
-> 如果场景已经存在，再次执行菜单会**覆盖**它（预制体也会覆盖），属于预期行为。
+1. 用 **Unity 6000.3.14f1**（Unity 6.3 LTS）打开本项目。
+2. 打开并运行 `Assets/Scenes/BallRoom`，屏幕中央出现连接菜单。
 
 ## 二、操作方式
 
@@ -40,7 +33,7 @@
 | 中途加入同步位置与速度 | `NetworkBall.OnSerialize/OnDeserialize`：`initialState` 时下发 位置+旋转+**线速度+角速度**，加入瞬间即吸附到主机当前状态 |
 | 主机退出处理 | `RoomNetworkManager.ShutdownGracefully()` 先 `RpcHostIsShuttingDown()` 再停机；异常掉线由 `OnClientDisconnect` → HUD 弹窗提示，并提供「返回房间菜单 / 自己开房」 |
 | 每 15 秒随机位置生成球 | `BallSpawner`（`spawnInterval=15f`，纯主机执行 `NetworkServer.Spawn`，超过 `maxBalls` 销毁最旧） |
-| 触碰提示 `Tapped` | `NetFirstPersonPlayer.OnCollisionEnter` → `RoomHud.ShowTapped()`（屏幕中央淡出文字） |
+| 触碰提示 `Tapped` | `NetFirstPersonPlayer.OnCollisionEnter` → `RoomHud.ShowTapped()`（屏幕中央淡出文字）(Tapped括号中表示球编号) |
 | Steam 联机 + 好友/房间邀请 | `SteamP2PTransport` + `SteamLobbyService`（AppID 480，见下一节） |
 
 ## 四、体系结构与主机权威策略
@@ -52,9 +45,8 @@ Player(本地) --CmdInput(输入帧)--> 主机 --> 在同一个 FixedUpdate 序�
 本地：收到主机权威状态后，与同一输入帧的预测结果对比 -> 平滑修正 / 远距离传送
 ```
 
-* **玩家**：输入 -> 服务器 -> 广播。本地客户端预测 + 平滑和解（`correctionThreshold=0.03m`，超过 3m 才直接传送）。
+* **玩家**：输入 -> 服务器 -> 广播。本地客户端预测 + 平滑和解。
 * **球体**：单向同步（主机 -> 客户端）。客户端 `isKinematic=true`，只按时间戳做快照插值（`SnapshotInterpolator`），绝不在本地用物理推进球，因此**不可能出现两侧球位置不一致**。
-* **推球手感**：本地客户端检测到自己撞到球时会立刻向主机上报一次冲量（`CmdPushBall`），主机校验收到的速度后 `AddForceAtPosition`。避免本地被运动学球“卡住”等待一个 RTT。
 
 ### 网络方案选择理由
 * **Mirror（HLAPI）**：其「服务器权威 + 客户端预测」模型与题目“主机权威，共享状态以主机为唯一数据源”的要求天然契合，成熟稳定、可读性好、开发成本低。
@@ -76,35 +68,21 @@ Player(本地) --CmdInput(输入帧)--> 主机 --> 在同一个 FixedUpdate 序�
 ### 前置条件
 1. Steam 客户端已登录并运行。
 2. 项目根目录已有 `steam_appid.txt`，内容为 `480`（本项目已自带；Steamworks.NET 用它初始化 AppID，**无需** Steamworks 账号也**无需**上架商店）。
-3. Steamworks.NET 的 native dll 已随包放入 `Assets/com.rlabrecque.steamworks.net/Plugins/steam_api64.dll`（无需额外安装，Unity 6 / Windows x64 可直接用）。
-   若报 dll 加载失败，可执行菜单 **`Steamworks.NET > Steamworks.NET > Redist Copy`**（`RedistInstall`）重新拷贝。
-4. 在 Editor 中点 Play。**务必通过 Steam 客户端启动 Unity**（或用 Steam 里「添加非 Steam 游戏」把 Unity Hub / Unity.exe 加进去），
-   否则 `SteamManager.Initialized == false`，HUD 会提示 “Steam 未初始化” 并只能使用本机模式。
+3. 在 Editor 中点 Play。
 
-### 单机验证（同一台机器，1 个 Steam 账号也可以跑通 P2P）
-Steam P2P 是**账号维度**寻址的：同一个 Steam 账号在同一台机器上只有一个 Steam Client 会话，
-两台实例共享同一个 SteamID，所以**不推荐**只用一台机器 + 一个账号自连自用（本地炕/network loop 虽不会被拒绝，但对方就是你自己，没有意义）。
-
-因此本地 & 远程推荐如下组合：
+### 运行验证
 
 #### 方案 A：两台机器 / 两个 Steam 账号（推荐，真实 NAT 穿透）
-1. 两台机器都用各自的 Steam 账号登录 Steam（互相加为好友）。
-2. 两边都通过 Steam 启动 Unity，打开 `BallRoom` 场景并 Play。
-3. **A 机器**：点 `创建 Steam 房间`。
+1. Steam 里「添加非 Steam 游戏」，选择 "../Build/PCDemo/NetTestDemo.exe"
+2. 两台机器都用各自的 Steam 账号登录 Steam（互相加为好友）。
+3. 两边都通过 Steam 启动 Unity，打开 `BallRoom` 场景并 Play。
+4. **A 机器**：点 `创建 Steam 房间`。
    - 内部流程：`SteamMatchmaking.CreateLobby(FriendsOnly)` → `LobbyCreated_t` → 设置富文本 `connect=<SteamID>` → `StartHost()`。
-4. **邀请**：A 机器建房后按 `Esc` 打开暂停菜单 → 点 `邀请 Steam 好友`（仅 Steam 房主可见）→ 弹出 Steam 邀请面板；或把 A 机器 HUD 上显示的 **本机 SteamID64** 直接发给 B。
-5. **B 机器**二选一：
+5. **邀请**：A 机器建房后按 `Esc` 打开暂停菜单 → 点 `邀请 Steam 好友`（仅 Steam 房主可见）→ 弹出 Steam 邀请面板；或把 A 机器 HUD 上显示的 **本机 SteamID64** 直接发给 B。
+6. **B 机器**二选一：
    - 在游戏里把 SteamID 填入输入框 → `用 SteamID 加入`；
    - 或先退出到 Steam 好友列表，右键 A → `加入游戏`（触发 `GameLobbyJoinRequested_t`，游戏会自动 `JoinLobby` → `StartClient`）。
-6. 连上后：A 为房主，推动球，B 端应立即看到同一颗球的位置/滚动；每 15 秒新生成的球两端一致；B 撞球时在 B 端显示 `Tapped!`。
-
-> 说明：**是否需要双开 Steam 客户端？** 不需要。Steam 的 P2P 由本机唯一 Steam 客户端进程转发，
-> 两个不同的 Steam 账号必须分别在两台机器（或两个不同 Windows 会话）登录，因此真实联机通常需要两台机器。
-> **ParrelSync 可以用吗？** 可以用来同时跑两个 Editor（方便调试），但仍受到上面的限制：
-> 两个 Editor 实例共用同一台机器上的同一个 Steam 登录会话 -> 只能得到同一个 SteamID，
-> 所以 ParrelSync 只能用于**本机 KCP 模式**（localhost:7777 / 本机 IP）的多实例测试，
-> **不能**用于在同一台机器上验证两个不同 Steam 账号的 P2P。
-> 如果需要“伪双人”跑 Steam 模式，请改用：一台机器跑 Editor/Player，另一台机器（或另一台物理设备/云桌面）登录另一个 Steam 账号。
+7. 连上后：A 为房主，推动球，B 端应立即看到同一颗球的位置/滚动；每 15 秒新生成的球两端一致；B 撞球时在 B 端显示 `Tapped!`。
 
 #### 方案 B：本机 / 局域网（KCP，不需要 Steam，用于日常联调）
 1. 机器 A：Play → `创建房间 (Host)`（默认 `localhost`）。
@@ -112,7 +90,7 @@ Steam P2P 是**账号维度**寻址的：同一个 Steam 账号在同一台机�
 3. 其余功能与 Steam 模式完全一致（Transport 换成 KCP）。
 
 ### 主机退出的验证
-* 优雅退出：房主在 HUD 右下角点 `返回房间菜单` → 主机先广播 `RpcHostIsShuttingDown`，所有客户端弹出「房主已关闭房间」浮层。
+* 优雅退出：按下ESC，点击 `返回房间菜单` → 主机先广播 `RpcHostIsShuttingDown`，所有客户端弹出「连接已断开」浮层。
 * 强制退出：直接关闭房主的 Play 窗口 / 结束进程 → 客户端 transport 超时（`SteamP2PTransport.connectionTimeout`）后触发 `OnClientDisconnect`，弹出「连接已断开」浮层。
 
 ## 七、目录结构
@@ -134,7 +112,7 @@ Assets/Scripts/
 ```
 
 ## 八、构建与提交说明
-* **Windows 构建**：`File → Build Settings`，平台选 **Windows x64**，Build 到 `Build/` 目录（提交时保留该目录供评委直接运行）。
+* **Windows 构建**：`File → Build Settings`，平台选 **Windows x64**，Build 到 `Build/` 目录。
 * Steam 联机时，构建出的 exe 同目录需保留 `steam_appid.txt`（内容 `480`）。
-* 提交请保留 Git 提交历史（我们希望看到实现过程，不要压成一次性提交）。
+* 保留 Git 提交历史。
 * 本 README 已包含：运行说明、功能对照、网络方案理由、Steam 测试步骤。
