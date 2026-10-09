@@ -96,7 +96,10 @@ Player(本地) --CmdInput(输入帧)--> 主机 --> 在同一个 FixedUpdate 序�
 ## 七、目录结构
 
 ```
-Assets/Scripts/
+Build                      Build 目录
+Developer                  开发人员资产目录
+NetTestDemo                项目目录
+NetTestDemo/Assets/Scripts/
   Steam/
     SteamP2PTransport.cs    Mirror Transport 实现（SteamNetworkingMessages，双通道 Reliable/Unreliable）
     SteamLobbyService.cs    大厅创建/加入、好友邀请、Rich Presence "加入游戏"
