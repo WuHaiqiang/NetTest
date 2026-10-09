@@ -46,20 +46,13 @@ namespace NetTest
 #if !DISABLESTEAMWORKS
         public CSteamID CurrentLobby { get; private set; } = CSteamID.Nil;
 #endif
-        public bool IsBusy { get; private set; }
-
-        // 简单防抖：避免重复点击造成重复创建大厅 / 重复 StartClient
+        // 简单防抖：避免重复点击造成重复创建大厅 / 重复 StartClient。
+        // 注意：不要依赖 LateUpdate 里重置的“忙”标志——退出房间后该组件可能处于禁用状态，
+        // 导致 LateUpdate 不再执行、标志卡在 true，进而永久拦截创建请求。这里只用时间冷却做防抖。
         float lastActionTime = -10f;
         const float ActionCooldown = 1f;
 
-        bool ActionLocked
-        {
-            get
-            {
-                if (IsBusy) return true;
-                return Time.realtimeSinceStartup - lastActionTime < ActionCooldown;
-            }
-        }
+        bool ActionLocked => Time.realtimeSinceStartup - lastActionTime < ActionCooldown;
 
         void MarkAction()
         {
@@ -95,13 +88,20 @@ namespace NetTest
 
         void Start() => SetStatus(SteamReady ? "就绪：Steam 已初始化。" : "警告：Steam 未初始化（请通过 Steam 运行游戏）。");
 
-        void LateUpdate() => IsBusy = false;
+        void LateUpdate()
+        {
+            // Steam 通常在组件 OnEnable 之后才完成初始化，所以这里持续补注册，
+            // 一旦 SteamManager.Initialized 变为 true 就把回调建好，避免 lobbyCreated 为 null。
+            EnsureSteamCallbacks();
+        }
 
-        void OnEnable()
+        void OnEnable() => EnsureSteamCallbacks();
+
+        /// <summary>在 Steam 初始化完成后注册所有回调（幂等）。</summary>
+        void EnsureSteamCallbacks()
         {
 #if !DISABLESTEAMWORKS
-            if (!SteamManager.Initialized) return;
-            if (callbacksRegistered) return;
+            if (!SteamManager.Initialized || callbacksRegistered) return;
 
             gameLobbyJoinRequested = Callback<GameLobbyJoinRequested_t>.Create(OnGameLobbyJoinRequested);
             richPresenceJoinRequested = Callback<GameRichPresenceJoinRequested_t>.Create(OnRichPresenceJoinRequested);
@@ -166,13 +166,13 @@ namespace NetTest
         /// <summary>创建大厅并作为主机启动（等大厅创建成功后再 StartHost）。</summary>
         public void CreateRoom()
         {
+            EnsureSteamCallbacks();
             if (!SteamReady)
             {
                 SetStatus("无法创建房间：Steam 未初始化。");
                 return;
             }
             if (ActionLocked) return;
-            IsBusy = true;
             MarkAction();
             SetStatus("正在创建 Steam 大厅…");
 #if !DISABLESTEAMWORKS
@@ -195,6 +195,7 @@ namespace NetTest
         /// <summary>直接连接指定 SteamID64 的主机（不需要大厅）。</summary>
         public void JoinSteamId(ulong hostSteamId)
         {
+            EnsureSteamCallbacks();
             if (!SteamReady)
             {
                 SetStatus("无法加入：Steam 未初始化。");
@@ -219,6 +220,7 @@ namespace NetTest
         /// <summary>通过 Steam 大厅 ID 加入（好友接受邀请后走这里）。</summary>
         public void JoinLobby(ulong lobbySteamId)
         {
+            EnsureSteamCallbacks();
             if (!SteamReady) { SetStatus("Steam 未初始化。"); return; }
 #if !DISABLESTEAMWORKS
             if (CurrentLobby.IsValid())
