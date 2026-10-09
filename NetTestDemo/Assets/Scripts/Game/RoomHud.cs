@@ -87,18 +87,17 @@ namespace NetTest
 
         void Update()
         {
-            if (!Online) cursorUnlockedByUser = false;
-
-            // Esc：解锁鼠标（再点一下鼠标左键回到游戏）
-            if (KeyWasPressed(unlockKey) && Online)
+            if (!Online)
             {
-                cursorUnlockedByUser = true;
-                Cursor.lockState = CursorLockMode.None;
-                Cursor.visible = true;
+                cursorUnlockedByUser = false;
+                HandleCursor();
+                return;
             }
 
-            if (cursorUnlockedByUser && Online && MouseWasPressed() && string.IsNullOrEmpty(noticeTitle))
-                cursorUnlockedByUser = false;
+            // Esc 切换 锁定 / 解锁。解锁后鼠标自由移动，可正常点击 UI 按钮；
+            // 没有“点一下就自动锁回”的逻辑，避免锁回动作把点击吞掉。
+            if (KeyWasPressed(unlockKey))
+                cursorUnlockedByUser = !cursorUnlockedByUser;
 
             HandleCursor();
         }
@@ -136,23 +135,18 @@ namespace NetTest
         void HandleCursor()
         {
             if (!cursorLockedInGame) return;
-            if (!Online)
+
+            // 离线 / 弹窗 / 已解锁：鼠标自由，方便点按钮
+            if (!Online || !string.IsNullOrEmpty(noticeTitle) || cursorUnlockedByUser)
             {
-                if (Cursor.lockState != CursorLockMode.None)
-                {
-                    Cursor.lockState = CursorLockMode.None;
-                    Cursor.visible = true;
-                }
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
                 return;
             }
 
-            if (cursorUnlockedByUser) return;
-
-            if (Cursor.lockState != CursorLockMode.Locked && string.IsNullOrEmpty(noticeTitle))
-            {
-                Cursor.lockState = CursorLockMode.Locked;
-                Cursor.visible = false;
-            }
+            // 正常游戏：锁定鼠标
+            Cursor.lockState = CursorLockMode.Locked;
+            Cursor.visible = false;
         }
 
         // public API //////////////////////////////////////////////////////////
@@ -243,6 +237,8 @@ namespace NetTest
             if (Online) DrawInGameHud();
             else DrawMainMenu();
 
+            if (Online && cursorUnlockedByUser) DrawPauseMenu();
+
             DrawTapped();
             DrawNotice();
         }
@@ -258,7 +254,7 @@ namespace NetTest
 
         void DrawCrosshair()
         {
-            if (string.IsNullOrEmpty(noticeTitle))
+            if (string.IsNullOrEmpty(noticeTitle) && !cursorUnlockedByUser)
             {
                 GUI.color = new Color(1f, 1f, 1f, 0.75f);
                 GUI.DrawTexture(new Rect(Screen.width * 0.5f - 1f, Screen.height * 0.5f - 8f, 2f, 16f), Texture2D.whiteTexture);
@@ -277,7 +273,7 @@ namespace NetTest
                 ? "<no manager>"
                 : NetworkServer.active && NetworkClient.active ? "房主 (Host)" : NetworkClient.active ? "客户端" : "仅服务器";
 
-            int players = manager != null && NetworkServer.active ? manager.PlayerCount : (NetworkClient.active ? 1 : 0);
+            int players = manager != null ? manager.PlayerCountUI : 0;
             int max = manager != null ? manager.maxPlayers : 4;
 
             GUILayout.BeginArea(new Rect(16, 16, 340, 260), panelStyle);
@@ -300,16 +296,34 @@ namespace NetTest
                 GUILayout.Label("WASD 移动 · Space 跳 · 鼠标看 · Esc 解锁鼠标", labelStyle);
             }
             GUILayout.EndArea();
+        }
 
-            // 右下：离开房间
-            GUILayout.BeginArea(new Rect(Screen.width - 220, Screen.height - 110, 200, 90), panelStyle);
-            if (GUILayout.Button("返回房间菜单", buttonStyle))
+        /// <summary>断开并返回房间菜单（房主会先通知客户端）。</summary>
+        void LeaveRoom()
+        {
+            if (NetworkServer.active) Manager?.ShutdownGracefully();
+            else Manager?.StopNetwork(true);
+        }
+
+        /// <summary>按 Esc 解锁后显示的中央暂停菜单，按钮大、居中，避免点不到。</summary>
+        void DrawPauseMenu()
+        {
+            int w = 360, h = 240;
+            Rect area = new Rect((Screen.width - w) / 2f, (Screen.height - h) / 2f, w, h);
+            GUILayout.BeginArea(area, panelStyle);
+            GUILayout.Label("已暂停", titleStyle);
+            GUILayout.Space(10);
+            if (GUILayout.Button("继续游戏", buttonStyle, GUILayout.Height(40)))
+                cursorUnlockedByUser = false;
+            GUILayout.Space(8);
+            if (GUILayout.Button("返回房间菜单", buttonStyle, GUILayout.Height(40)))
+                LeaveRoom();
+            if (Online && NetworkServer.active && Lobby != null)
             {
-                if (NetworkServer.active) Manager?.ShutdownGracefully();
-                else Manager?.StopNetwork(true);
+                GUILayout.Space(8);
+                if (GUILayout.Button("邀请 Steam 好友", buttonStyle, GUILayout.Height(40)))
+                    Lobby.InviteFriends();
             }
-            if (Online && NetworkServer.active && Lobby != null && GUILayout.Button("邀请 Steam 好友", buttonStyle))
-                Lobby.InviteFriends();
             GUILayout.EndArea();
         }
 
@@ -401,7 +415,9 @@ namespace NetTest
         static int CountBalls()
         {
             int count = 0;
-            foreach (KeyValuePair<uint, NetworkIdentity> entry in NetworkServer.spawned)
+            // 客户端没有 NetworkServer.spawned，必须用当前所在端对应的集合
+            var source = NetworkServer.active ? NetworkServer.spawned : NetworkClient.spawned;
+            foreach (KeyValuePair<uint, NetworkIdentity> entry in source)
                 if (entry.Value != null && entry.Value.TryGetComponent(out NetworkBall _))
                     count++;
             return count;

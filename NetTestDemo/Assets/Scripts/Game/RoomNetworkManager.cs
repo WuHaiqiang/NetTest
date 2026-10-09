@@ -58,6 +58,20 @@ namespace NetTest
             }
         }
 
+        /// <summary>UI 用：自动按当前所在端（服务器或客户端）统计房间人数，避免客户端永远显示 1。</summary>
+        public int PlayerCountUI
+        {
+            get
+            {
+                int count = 0;
+                var source = NetworkServer.active ? NetworkServer.spawned : NetworkClient.spawned;
+                foreach (KeyValuePair<uint, NetworkIdentity> entry in source)
+                    if (entry.Value != null && entry.Value.TryGetComponent(out NetFirstPersonPlayer _))
+                        count++;
+                return count;
+            }
+        }
+
         /// <summary>供 UI 显示的断开原因（非空表示需要弹提示）</summary>
         public string DisconnectNotice { get; set; } = string.Empty;
 

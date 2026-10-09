@@ -117,6 +117,9 @@ namespace NetTest
         {
             rb = GetComponent<Rigidbody>();
             capsule = GetComponent<CapsuleCollider>();
+            // 重力完全由 ApplyGravityCorrection 按 gravityMultiplier 控制，
+            // 关闭 Unity 自带重力，否则会叠加成双重重力且上升阶段无减速。
+            rb.useGravity = false;
         }
 
         public override void OnStartServer()
@@ -194,7 +197,7 @@ namespace NetTest
         {
             Vector2 delta = InputLook();
             yaw += delta.x * mouseSensitivity;
-            pitch = Mathf.Clamp(pitch - delta.y * mouseSensitivity, -maxPitch, maxPitch);
+            pitch = Mathf.Clamp(pitch + delta.y * mouseSensitivity, -maxPitch, maxPitch);
 
             rb.MoveRotation(Quaternion.Euler(0f, yaw, 0f));
         }
@@ -338,20 +341,24 @@ namespace NetTest
 
         void ApplyGravityCorrection()
         {
-            // 让下落比 Unity 默认重力稍快一点，手感更好，且各端一致
-            Vector3 velocity = rb.linearVelocity;
-            if (!IsGrounded() && velocity.y < 0f)
+            // 离地时全程施加重力（上升减速 + 下落加速），各端一致。
+            // 关闭了 Unity 自带重力，这里就是唯一的重力来源。
+            if (!IsGrounded())
             {
-                velocity.y -= Physics.gravity.y * (gravityMultiplier - 1f) * Time.fixedDeltaTime;
+                Vector3 velocity = rb.linearVelocity;
+                velocity.y += Physics.gravity.y * gravityMultiplier * Time.fixedDeltaTime;
                 rb.linearVelocity = velocity;
             }
         }
 
         bool IsGrounded()
         {
-            Vector3 origin = rb != null ? rb.position : transform.position;
-            float distance = Height * 0.5f + 0.15f;
-            return Physics.Raycast(origin + Vector3.up * 0.2f, Vector3.down, distance, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+            // 从脚底上方一点点向下打一根短射线：站在地面时一定命中。
+            // 注意：射线起点要从脚底往上一点，否则从胶囊体底部内侧出发会漏检地面。
+            float half = Height * 0.5f;
+            Vector3 origin = rb.position - Vector3.up * (half - 0.1f);
+            float distance = 0.1f + 0.15f;
+            return Physics.Raycast(origin, Vector3.down, distance, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
         }
 
         // remote proxies //////////////////////////////////////////////////////
