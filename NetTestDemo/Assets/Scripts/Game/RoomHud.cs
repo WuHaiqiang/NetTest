@@ -47,6 +47,7 @@ namespace NetTest
         string addressInput = "localhost";
         bool showDebug = true;
         bool cursorUnlockedByUser;
+        bool pauseMenuOpen; // 用于“打开暂停菜单时只打印一次日志”
 
         GUIStyle panelStyle;
         GUIStyle titleStyle;
@@ -58,7 +59,16 @@ namespace NetTest
         bool stylesReady;
 
         RoomNetworkManager Manager => RoomNetworkManager.Instance;
-        SteamLobbyService Lobby => SteamLobbyService.Instance;
+        SteamLobbyService Lobby
+        {
+            get
+            {
+                // 静态 Instance 可能因场景重载 / 对象销毁而悬空（Unity 的 == 会把它判为 null），
+                // 这里回退到 FindObjectOfType 拿到当前存活的实例，避免取到的引用失效。
+                if (SteamLobbyService.Instance != null) return SteamLobbyService.Instance;
+                return FindObjectOfType<SteamLobbyService>();
+            }
+        }
 
         static bool Online => NetworkClient.active || NetworkServer.active;
 
@@ -249,6 +259,7 @@ namespace NetTest
             if (Online) DrawPlayerLabels();
 
             if (Online && cursorUnlockedByUser) DrawPauseMenu();
+            else pauseMenuOpen = false;
 
             DrawTapped();
             DrawNotice();
@@ -339,7 +350,10 @@ namespace NetTest
             int players = manager != null ? manager.PlayerCountUI : 0;
             int max = manager != null ? manager.maxPlayers : 4;
 
-            GUILayout.BeginArea(new Rect(16, 16, 340, 260), panelStyle);
+            // 外层只负责定位与宽度；高度给足，避免裁切。
+            GUILayout.BeginArea(new Rect(16, 16, 340, Screen.height - 32));
+            // 内层用 panelStyle 的 box，会按内容自动撑高（背景贴图随高度拉伸）。
+            GUILayout.BeginVertical(panelStyle);
             if (GUILayout.Button("球体房间 · 多人联机  (点击隐藏/显示信息)", buttonStyle))
                 showDebug = !showDebug;
 
@@ -358,6 +372,7 @@ namespace NetTest
                 GUILayout.Space(4);
                 GUILayout.Label("WASD 移动 · Space 跳 · 鼠标看 · Esc 解锁鼠标", labelStyle);
             }
+            GUILayout.EndVertical();
             GUILayout.EndArea();
         }
 
@@ -381,11 +396,28 @@ namespace NetTest
             GUILayout.Space(8);
             if (GUILayout.Button("返回房间菜单", buttonStyle, GUILayout.Height(40)))
                 LeaveRoom();
-            if (Online && NetworkServer.active && Lobby != null)
+            // 仅在“以房主身份通过 Steam 建房”时显示邀请按钮；本机/KCP 联机不显示。
+            // 用 TransportMode 判断最稳：Steam 建房时 SelectSteamTransport 会把它置为 Steam，
+            // 本地/KCP 建房则保持 Local。不再依赖 SteamLobbyService.Instance（可能因场景重载悬空）。
+            bool isSteamHost = NetworkServer.active && Manager != null &&
+                               Manager.TransportMode == RoomTransportMode.Steam;
+
+            // 诊断日志：打开暂停菜单的瞬间只打印一次，方便确认为什么邀请按钮没出现
+            if (!pauseMenuOpen)
+            {
+                pauseMenuOpen = true;
+                string role = Lobby != null ? Lobby.Role.ToString() : "<Lobby=null>";
+                string mode = Manager != null ? Manager.TransportMode.ToString() : "<Manager=null>";
+                int lobbyId = Lobby != null ? Lobby.GetInstanceID() : -1;
+                Debug.Log($"[RoomHud] 暂停菜单打开 | Online={Online} NetworkServer.active={NetworkServer.active} " +
+                          $"Lobby={(Lobby != null ? "存在" : "null")}(id={lobbyId}) Role={role} TransportMode={mode} isSteamHost={isSteamHost}");
+            }
+
+            if (isSteamHost)
             {
                 GUILayout.Space(8);
                 if (GUILayout.Button("邀请 Steam 好友", buttonStyle, GUILayout.Height(40)))
-                    Lobby.InviteFriends();
+                    Lobby?.InviteFriends();
             }
             GUILayout.EndArea();
         }
@@ -418,10 +450,11 @@ namespace NetTest
             GUILayout.Label("【Steam P2P（好友 / 房间邀请，走 Steam Relay）】", labelStyle);
             bool steamReady = SteamLobbyService.SteamReady;
             GUI.enabled = steamReady;
-            if (GUILayout.Button("创建 Steam 房间（可直接邀请好友）", buttonStyle, GUILayout.Height(34)))
+            if (GUILayout.Button("创建 Steam 房间", buttonStyle, GUILayout.Height(34)))
+            {
+                Debug.Log($"[RoomHud] 点击创建Steam房间 | Lobby={(Lobby != null ? "存在" : "null")} SteamReady={SteamLobbyService.SteamReady}");
                 Lobby?.CreateRoom();
-            if (GUILayout.Button("邀请 Steam 好友到当前房间", buttonStyle, GUILayout.Height(34)))
-                Lobby?.InviteFriends();
+            }
             GUILayout.BeginHorizontal();
             steamIdInput = GUILayout.TextField(steamIdInput, GUILayout.Height(34));
             if (GUILayout.Button("用 SteamID 加入", buttonStyle, GUILayout.Height(34)))

@@ -32,7 +32,29 @@ namespace NetTest
         public const string LobbyDataKeyName = "NetTestRoom";
         public const string LobbyDataVersion = "1";
 
-        public static SteamLobbyService Instance { get; private set; }
+        private static SteamLobbyService instance;
+        /// <summary>
+        /// 全局单例。若当前没有存活的实例（例如对象被场景切换销毁），会自动重新创建一个常驻实例，
+        /// 避免 Instance 悬空导致 UI 取到的 Lobby 为 null。
+        /// </summary>
+        public static SteamLobbyService Instance
+        {
+            get
+            {
+                if (instance == null)
+                {
+                    instance = FindFirstObjectByType<SteamLobbyService>();
+                    if (instance == null && Application.isPlaying)
+                    {
+                        GameObject go = new GameObject("SteamLobbyService");
+                        instance = go.AddComponent<SteamLobbyService>();
+                        DontDestroyOnLoad(go);
+                    }
+                }
+                return instance;
+            }
+            private set { instance = value; }
+        }
 
         [Header("Room")]
         [Range(1, 4)]
@@ -46,6 +68,19 @@ namespace NetTest
 #if !DISABLESTEAMWORKS
         public CSteamID CurrentLobby { get; private set; } = CSteamID.Nil;
 #endif
+
+        /// <summary>当前是否处于一个有效的 Steam 大厅中（用于区分 Steam 房间与本机/KCP 房间）。</summary>
+        public bool IsInSteamLobby
+        {
+            get
+            {
+#if !DISABLESTEAMWORKS
+                return CurrentLobby.IsValid();
+#else
+                return false;
+#endif
+            }
+        }
         // 简单防抖：避免重复点击造成重复创建大厅 / 重复 StartClient。
         // 注意：不要依赖 LateUpdate 里重置的“忙”标志——退出房间后该组件可能处于禁用状态，
         // 导致 LateUpdate 不再执行、标志卡在 true，进而永久拦截创建请求。这里只用时间冷却做防抖。
@@ -77,13 +112,23 @@ namespace NetTest
         // ---------------------------------------------------------------------
         void Awake()
         {
-            if (Instance != null && Instance != this)
+            Debug.Log($"[SteamLobby] Awake id={GetInstanceID()} 旧instance={(instance != null ? instance.GetInstanceID().ToString() : "null")}");
+            if (instance != null && instance != this)
             {
+                Debug.Log($"[SteamLobby] 销毁重复实例 id={GetInstanceID()}（保留 instance={instance.GetInstanceID()}）");
                 Destroy(gameObject);
                 return;
             }
-            Instance = this;
+            instance = this;
             DontDestroyOnLoad(gameObject);
+        }
+
+        void OnDestroy()
+        {
+            Debug.Log($"[SteamLobby] OnDestroy id={GetInstanceID()} instance={(instance != null ? instance.GetInstanceID().ToString() : "null")}");
+            // 单例对象被销毁时清掉静态引用，避免 instance 悬空指向已销毁对象（Unity 的 == 会判为 null）。
+            // 之后任何对 Instance 的访问都会自动重新创建一个常驻实例。
+            if (instance == this) instance = null;
         }
 
         void Start() => SetStatus(SteamReady ? "就绪：Steam 已初始化。" : "警告：Steam 未初始化（请通过 Steam 运行游戏）。");
@@ -185,6 +230,7 @@ namespace NetTest
         public void InviteFriends()
         {
 #if !DISABLESTEAMWORKS
+            Debug.Log($"[SteamLobby] InviteFriends 调用 | this.id={GetInstanceID()} SteamReady={SteamReady} CurrentLobby={(CurrentLobby.IsValid() ? CurrentLobby.m_SteamID.ToString() : "Nil")}");
             if (!SteamReady) { SetStatus("Steam 未初始化，无法邀请。"); return; }
             if (!CurrentLobby.IsValid()) { SetStatus("需要先创建房间才能邀请好友。"); return; }
             SteamFriends.ActivateGameOverlayInviteDialog(CurrentLobby);
@@ -305,6 +351,7 @@ namespace NetTest
             }
 
             Role = RoomRole.Host;
+            Debug.Log($"[SteamLobby] OnLobbyCreated: this.id={GetInstanceID()} lobby={result.m_ulSteamIDLobby} Role={Role} CurrentLobby.IsValid={CurrentLobby.IsValid()}");
             manager.HostViaSteam();
             SetStatus($"房间已创建（SteamID: {SteamUser.GetSteamID().m_SteamID}），等待玩家加入。");
         }
