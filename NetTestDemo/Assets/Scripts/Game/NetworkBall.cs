@@ -23,6 +23,10 @@ namespace NetTest
         [Tooltip("显示来自主机的权威速度")]
         public bool logVelocity;
 
+        [Header("Sync")]
+        [Tooltip("服务器向客户端同步球的频率（秒）。越小越流畅、越占带宽。默认 1/60 ≈ 60Hz")]
+        public float syncIntervalSeconds = 1f / 60f;
+
         Rigidbody rb;
         Renderer[] visuals;
         MaterialPropertyBlock propertyBlock;
@@ -48,6 +52,8 @@ namespace NetTest
             rb = GetComponent<Rigidbody>();
             visuals = GetComponentsInChildren<Renderer>(true);
             propertyBlock = new MaterialPropertyBlock();
+            // 提高同步频率：默认 10Hz 太低，快速运动的球会一顿一顿。
+            syncInterval = syncIntervalSeconds;
         }
 
         public override void OnStartServer()
@@ -65,6 +71,9 @@ namespace NetTest
                 // 纯客户端：物理不做本地仿真，只按主机状态插值
                 rb.isKinematic = true;
                 rb.collisionDetectionMode = CollisionDetectionMode.Continuous;
+                // 位置由我们自己的插值器每帧直接设置，关闭 Unity 自带的刚体插值，
+                // 否则会与我们的插值叠加，造成二次平滑 / 抖动。
+                rb.interpolation = RigidbodyInterpolation.None;
             }
             ApplyTint();
 
@@ -126,8 +135,11 @@ namespace NetTest
                 return;
             }
 
-            rb.MovePosition(position);
-            rb.MoveRotation(rotation);
+            // 直接赋值（而非 MovePosition）：MovePosition 会把移动推迟到下一个 FixedUpdate，
+            // 当渲染帧率与物理步长不一致时产生微抖动。插值后的位置本身已是平滑值，
+            // 每帧直接落位即可得到最顺滑的显示。
+            rb.position = position;
+            rb.rotation = rotation;
 
             if (logVelocity)
                 Debug.Log($"[Ball {netId}] v={interpolator.CurrentState.velocity:F2}");

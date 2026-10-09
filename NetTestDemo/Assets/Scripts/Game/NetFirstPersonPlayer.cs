@@ -140,6 +140,8 @@ namespace NetTest
         {
             rb = GetComponent<Rigidbody>();
             capsule = GetComponent<CapsuleCollider>();
+            // 与全局 60Hz 帧率保持一致，让其他客户端看到本玩家的移动也以 60Hz 同步。
+            syncInterval = 1f / 60f;
             // 重力完全由 ApplyGravityCorrection 按 gravityMultiplier 控制，
             // 关闭 Unity 自带重力，否则会叠加成双重重力且上升阶段无减速。
             rb.useGravity = false;

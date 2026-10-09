@@ -43,6 +43,10 @@ namespace NetTest
         public SteamP2PTransport steamTransport;
         public Transport localTransport;
 
+        [Header("Network Rate")]
+        [Tooltip("联机状态同步频率（Hz）。默认 60。越高越流畅、越占带宽。")]
+        public float networkTickRate = 60f;
+
         public RoomTransportMode TransportMode { get; private set; } = RoomTransportMode.Local;
 
         /// <summary>当前房间内的玩家数量（房主视角权威数据）</summary>
@@ -81,6 +85,10 @@ namespace NetTest
         public override void Awake()
         {
             base.Awake();
+            // 全局网络帧率：NetworkManager.sendRate 会由 ApplyConfiguration() 每帧应用到
+            // NetworkServer.tickRate（NetworkServer.sendInterval 是派生的只读属性，不能直接赋值）。
+            // 默认已是 60Hz，这里用可调字段覆盖，便于按需调整。
+            sendRate = Mathf.RoundToInt(Mathf.Max(1f, networkTickRate));
             // 默认用本机 KCP，切到 Steam 由 SelectSteamTransport() 完成
             SelectTransport(RoomTransportMode.Local, silent: true);
         }
