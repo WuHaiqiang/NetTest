@@ -112,6 +112,29 @@ namespace NetTest
 
         public string DisplayName => $"Player#{netId}";
 
+        // 每个玩家分配一个专属颜色，便于在画面中区分。编号由客户端按 netId 排序得到，
+        // 不依赖 SyncVar（避免客户端收不到同步值导致标签不显示）。
+        public static readonly Color32[] PlayerColors =
+        {
+            new Color32(0x4F, 0xC3, 0xF7, 255), // 1P 浅蓝
+            new Color32(0xF4, 0x6A, 0x6A, 255), // 2P 红
+            new Color32(0x8B, 0xE3, 0x6B, 255), // 3P 绿
+            new Color32(0xF6, 0xD7, 0x4F, 255), // 4P 黄
+            new Color32(0xB9, 0x8C, 0xF7, 255), // 5P 紫
+            new Color32(0xF7, 0xA1, 0x5C, 255), // 6P 橙
+        };
+
+        /// <summary>按编号返回对应颜色（编号从 1 开始）。</summary>
+        public static Color ColorForIndex(int index)
+        {
+            int i = index <= 0 ? 0 : index - 1;
+            i %= PlayerColors.Length;
+            return PlayerColors[i];
+        }
+
+        /// <summary>头顶标签的世界坐标（略高于角色顶部）。</summary>
+        public Vector3 LabelAnchor => transform.position + Vector3.up * (Height + 0.3f);
+
         // ---------------------------------------------------------------------
         void Awake()
         {

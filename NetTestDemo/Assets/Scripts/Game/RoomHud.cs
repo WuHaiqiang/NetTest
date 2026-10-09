@@ -53,6 +53,7 @@ namespace NetTest
         GUIStyle labelStyle;
         GUIStyle buttonStyle;
         GUIStyle tappedStyle;
+        GUIStyle playerTagStyle;
         Texture2D panelTexture;
         bool stylesReady;
 
@@ -227,6 +228,14 @@ namespace NetTest
             };
             tappedStyle.normal.textColor = new Color(1f, 0.86f, 0.2f);
 
+            playerTagStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 18,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter
+            };
+            playerTagStyle.normal.textColor = Color.white;
+
             stylesReady = true;
         }
 
@@ -236,6 +245,8 @@ namespace NetTest
 
             if (Online) DrawInGameHud();
             else DrawMainMenu();
+
+            if (Online) DrawPlayerLabels();
 
             if (Online && cursorUnlockedByUser) DrawPauseMenu();
 
@@ -261,6 +272,58 @@ namespace NetTest
                 GUI.DrawTexture(new Rect(Screen.width * 0.5f - 8f, Screen.height * 0.5f - 1f, 16f, 2f), Texture2D.whiteTexture);
                 GUI.color = Color.white;
             }
+        }
+
+        /// <summary>在每名玩家头顶投影显示「1P / 2P / 3P …」标签，颜色按序号区分。
+        /// 序号由各端按 netId 升序本地推导，无需依赖 SyncVar，保证主机/客户端一致。</summary>
+        void DrawPlayerLabels()
+        {
+            Camera cam = ActiveGameCamera();
+            if (cam == null) return;
+
+            var players = new List<NetFirstPersonPlayer>(FindObjectsOfType<NetFirstPersonPlayer>());
+            players.Sort((a, b) => a.netId.CompareTo(b.netId));
+
+            for (int i = 0; i < players.Count; i++)
+            {
+                var p = players[i];
+
+                // 本地第一人称玩家看不到自己头顶的标签（在摄像机背后），直接跳过。
+                if (p.isLocalPlayer) continue;
+
+                int number = i + 1;
+                string text = number + "P";
+
+                Vector3 screen = cam.WorldToScreenPoint(p.LabelAnchor);
+                if (screen.z <= 0f) continue; // 在摄像机背后
+
+                var style = new GUIStyle(playerTagStyle) { normal = { textColor = NetFirstPersonPlayer.ColorForIndex(number) } };
+                Vector2 wsize = style.CalcSize(new GUIContent(text));
+                float x = screen.x - wsize.x * 0.5f;
+                float y = Screen.height - screen.y - wsize.y;
+
+                // 半透明描边底，保证在任意背景下都清晰可读
+                GUI.color = new Color(0f, 0f, 0f, 0.5f);
+                GUI.DrawTexture(new Rect(x - 5f, y - 3f, wsize.x + 10f, wsize.y + 6f), Texture2D.whiteTexture);
+                GUI.color = Color.white;
+                GUI.Label(new Rect(x, y, wsize.x, wsize.y), text, style);
+            }
+        }
+
+        /// <summary>取当前正在渲染世界的摄像机：优先用本地玩家的 playerCamera（保证投影坐标与画面一致），
+        /// 否则回退到 MainCamera / 第一个启用的摄像机。</summary>
+        static Camera ActiveGameCamera()
+        {
+            var players = FindObjectsOfType<NetFirstPersonPlayer>();
+            foreach (var p in players)
+                if (p.isLocalPlayer && p.playerCamera != null && p.playerCamera.isActiveAndEnabled)
+                    return p.playerCamera;
+
+            if (Camera.main != null && Camera.main.isActiveAndEnabled) return Camera.main;
+            foreach (Camera c in Camera.allCameras)
+                if (c.isActiveAndEnabled && c.targetTexture == null)
+                    return c;
+            return null;
         }
 
         void DrawInGameHud()
@@ -395,16 +458,9 @@ namespace NetTest
             GUILayout.Label(noticeBody, labelStyle);
             GUILayout.FlexibleSpace();
 
-            if (GUILayout.Button("返回房间菜单", buttonStyle, GUILayout.Height(36)))
+            if (GUILayout.Button("OK", buttonStyle, GUILayout.Height(36)))
             {
                 Manager?.ReturnToMenu();
-                noticeTitle = string.Empty;
-                noticeBody = string.Empty;
-            }
-            if (GUILayout.Button("我自己开一个房间", buttonStyle, GUILayout.Height(36)))
-            {
-                Manager?.ReturnToMenu();
-                Lobby?.CreateRoom();
                 noticeTitle = string.Empty;
                 noticeBody = string.Empty;
             }
