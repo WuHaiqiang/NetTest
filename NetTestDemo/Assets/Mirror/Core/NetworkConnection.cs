@@ -6,7 +6,11 @@ using UnityEngine;
 namespace Mirror
 {
     /// <summary>Base NetworkConnection class for server-to-client and client-to-server connection.</summary>
-    [Serializable]
+    // NOTE: intentionally NOT [Serializable]. NetworkConnection is a runtime-only
+    // object (created when a client connects). Marking it [Serializable] makes
+    // Unity try to instantiate it while serializing any prefab that carries a
+    // NetworkIdentity, which calls Time.time in the constructor and throws
+    // "get_time is not allowed to be called during serialization".
     public abstract class NetworkConnection
     {
         public const int LocalConnectionId = 0;

@@ -5,7 +5,7 @@ using UnityEngine;
 
 namespace Mirror
 {
-    [Serializable]
+    // intentionally NOT [Serializable], see NetworkConnection for why.
     public class NetworkConnectionToClient : NetworkConnection
     {
         // rpcs are collected in a buffer, and then flushed out together.
